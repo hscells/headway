@@ -41,11 +41,3 @@ func (c *Client) Send(current, total float64, comment string) error {
 
 	return nil
 }
-
-func (c *Client) SetTotal(total float64) error {
-	return c.Send(-1, total, "")
-}
-
-func (c *Client) UpdateWithComment(current float64, comment string) error {
-	return
-}

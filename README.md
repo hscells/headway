@@ -2,6 +2,12 @@
 
 _Monitor the progress of stuff!_
 
+To install:
+
+```bash
+go get -u github.com/hscells/headway/cmd/hw
+```
+
 To create/update a progress bar, send a `PUT` request to the server:
 
 ```
