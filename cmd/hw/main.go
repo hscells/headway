@@ -14,6 +14,7 @@ const index string = `
 <html>
 <head>
 <title>headway server</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 * {
 	margin: 0;
@@ -89,7 +90,9 @@ func main() {
 		var p headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
 			p.LastUpdate = time.Now()
+			mu.Lock()
 			progress[p.Name] = p
+			mu.Unlock()
 			c.Status(http.StatusOK)
 			return
 		} else {
