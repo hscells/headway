@@ -108,7 +108,7 @@ func main() {
 			time.Sleep(1 * time.Hour)
 			mu.Lock()
 			for k, v := range progress {
-				if time.Since(v.LastUpdate) > 24*time.Hour {
+				if time.Since(v.LastUpdate) > 1*time.Hour {
 					delete(progress, k)
 				}
 			}
