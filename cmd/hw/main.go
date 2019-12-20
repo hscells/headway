@@ -85,7 +85,7 @@ func main() {
 		return
 	})
 
-	g.PUT("/p/send", func(c *gin.Context) {
+	g.PUT("/", func(c *gin.Context) {
 		var p headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
 			p.LastUpdate = time.Now()
