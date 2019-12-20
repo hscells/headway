@@ -25,10 +25,12 @@ func (c *Client) Send(current, total float64, comment string) error {
 	if err != nil {
 		return err
 	}
-	req.URL.Query().Set("name", c.name)
-	req.URL.Query().Set("current", fmt.Sprintf("%f", current))
-	req.URL.Query().Set("total", fmt.Sprintf("%f", total))
-	req.URL.Query().Set("comment", comment)
+	q := req.URL.Query()
+	q.Add("name", c.name)
+	q.Add("current", fmt.Sprintf("%f", current))
+	q.Add("total", fmt.Sprintf("%f", total))
+	q.Add("comment", comment)
+	req.URL.RawQuery = q.Encode()
 
 	resp, err := c.client.Do(req)
 	if err != nil {

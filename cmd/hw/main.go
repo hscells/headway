@@ -18,7 +18,7 @@ const index string = `
 * {
 	margin: 0;
 	padding: 0;
-
+	font-family: Helvetica, Arial, Sans-Serif;
 }
 body {
 	background: #000;
