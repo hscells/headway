@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,35 +37,64 @@ progress {
 	border: 1px solid #222;
 	padding: 8px;
 }
+a:clicked {
+	color: #aaa;
+}
+a { 
+	color: #eee;
+}
 </style>
 </head>
 <body>
 	{{ range $c, $p := .Progress }}
 	<div class="box">
-		<div><b>{{ $c }}</b> - {{ $p.CurrentProgress }}/{{ $p.TotalProgress }}</div>
+		<div><b class="name">{{ $p.Name }}</b> - {{ $p.CurrentProgress }}/{{ $p.TotalProgress }}</div>
 		<div><em>{{ $p.Comment}}</em></div>
 		<div>{{ $p.LastUpdate }}</div>
 		<div><progress value="{{ $p.CurrentProgress }}" max="{{ $p.TotalProgress }}"></progress></div>
 	</div>
 	{{ end }}
+	<div>
+		<p>sort by <a href="javascript:addSort('progress')">progress</a> | <a href="javascript:addSort('updated')">last updated</a></p>
+		<p>filter by:</p>
+		<ul>
+		{{ range $c, $p := .Filters }}
+			<li><a href="javascript:addFilter('{{$p}}')">{{$p}}</a></li>
+		{{ end }}
+		</ul>
+	</div>
 	<small>last updated: {{ .LastUpdated }}</small>
 <script type="text/javascript">
 window.setTimeout(function() {
 	location.reload();
 }, 5000)
+function addFilter(filter) {
+	var url = new URL(window.location);
+	url.searchParams.set("filter", filter);
+	window.location = url.href
+}
+function addSort(sort) {
+	var url = new URL(window.location);
+	url.searchParams.set("sort", sort);
+	window.location = url.href
+}
 </script>
 </body>
 </html>
 `
 
 type data struct {
-	Progress    map[string]headway.Progress
+	Progress    []*headway.Progress
+	Filters     []string
 	LastUpdated time.Time
 }
 
 func main() {
 
-	progress := make(map[string]headway.Progress)
+	progress := make(map[string]*headway.Progress)
+	var logsLastUpdated []*headway.Progress
+	var logsProgress []*headway.Progress
+	var filters []string
 	var mu sync.Mutex
 
 	tmpl, err := template.New("index").Parse(index)
@@ -71,23 +102,52 @@ func main() {
 		panic(err)
 	}
 
-	g := gin.New()
+	g := gin.Default()
 
 	g.GET("/", func(c *gin.Context) {
+		s := c.Query("sort")
+		f := c.Query("filter")
+
+		// Determine which ordering of logs should be presented.
+		mu.Lock()
+		logs := make([]*headway.Progress, len(logsProgress))
+		switch s {
+		case "progress":
+			copy(logs, logsProgress)
+		default:
+			copy(logs, logsLastUpdated)
+		}
+		mu.Unlock()
+
+		// Filter logs to those that contain the filter keyword.
+		if len(f) > 0 {
+			n := 0
+			for _, p := range logs {
+				if strings.Contains(p.Name, f) {
+					logs[n] = p
+					n++
+				}
+			}
+			logs = logs[:n]
+		}
+
+		// Execute the template with the chosen (subset of) logs.
 		err := tmpl.Execute(c.Writer, data{
-			Progress:    progress,
+			Progress:    logs,
+			Filters:     filters,
 			LastUpdated: time.Now(),
 		})
 		if err != nil {
 			c.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
+
 		c.Status(http.StatusOK)
 		return
 	})
 
 	g.PUT("/", func(c *gin.Context) {
-		var p headway.Progress
+		var p *headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
 			p.LastUpdate = time.Now()
 			mu.Lock()
@@ -106,12 +166,62 @@ func main() {
 	go func() {
 		for {
 			time.Sleep(1 * time.Hour)
+
 			mu.Lock()
 			for k, v := range progress {
 				if time.Since(v.LastUpdate) > 1*time.Hour {
 					delete(progress, k)
 				}
 			}
+			logsLastUpdated = make([]*headway.Progress, 0)
+			logsProgress = make([]*headway.Progress, 0)
+			mu.Unlock()
+		}
+	}()
+
+	// Sort progress bars.
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+
+			filters = make([]string, 0)
+			seenFilters := make(map[string]struct{})
+			logsLastUpdated = make([]*headway.Progress, len(progress))
+			logsProgress = make([]*headway.Progress, len(progress))
+
+			mu.Lock()
+			i := 0
+			for k, v := range progress {
+
+				// Find filters.
+				split := strings.Split(k, " ")
+				for _, kw := range split {
+					if _, ok := seenFilters[kw]; ok {
+						continue
+					}
+					if kw[0] == '@' {
+						filters = append(filters, kw)
+						seenFilters[kw] = struct{}{}
+					}
+				}
+
+				// Populate the lists.
+				logsLastUpdated[i] = v
+				logsProgress[i] = v
+				i++
+			}
+
+			// Sort filters in alphabetical order.
+			sort.Strings(filters)
+
+			// Sort by last update.
+			sort.Slice(logsLastUpdated, func(i, j int) bool {
+				return logsLastUpdated[i].LastUpdate.After(logsLastUpdated[j].LastUpdate)
+			})
+			// Sort by progress.
+			sort.Slice(logsProgress, func(i, j int) bool {
+				return (logsProgress[i].CurrentProgress / logsProgress[i].TotalProgress) > (logsProgress[j].CurrentProgress / logsProgress[j].TotalProgress)
+			})
 			mu.Unlock()
 		}
 	}()
