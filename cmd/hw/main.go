@@ -130,26 +130,6 @@ func main() {
 		}
 		mu.Unlock()
 
-		// Compute time remaining for each log item.
-		for n, p := range logs {
-			now := time.Now()
-			if p.CurrentProgress >= p.TotalProgress {
-				continue
-			}
-
-			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
-			decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
-
-			slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastCompleted.Seconds()
-			weight := math.Exp(-1 / (p.TotalProgress * decayP))
-			rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
-			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
-
-			logs[n].Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
-			logs[n].Elapsed = durafmt.Parse(now.Sub(p.Started)).LimitFirstN(2).String()
-			logs[n].RateEstimate = rateEst
-		}
-
 		// Filter logs to those that contain the filter keyword.
 		if len(f) > 0 {
 			n := 0
@@ -194,6 +174,19 @@ func main() {
 				p.LastUpdate = time.Now()
 				p.Started = p.LastUpdate
 			}
+
+			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
+			decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
+
+			slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastCompleted.Seconds()
+			weight := math.Exp(-1 / (p.TotalProgress * decayP))
+			rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
+			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
+
+			p.Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
+			p.Elapsed = durafmt.Parse(time.Now().Sub(p.Started)).LimitFirstN(2).String()
+			p.RateEstimate = rateEst
+
 			progress[p.Name] = p
 			mu.Unlock()
 			c.Status(http.StatusOK)
