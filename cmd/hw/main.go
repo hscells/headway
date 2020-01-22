@@ -179,11 +179,9 @@ func main() {
 				slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastCompleted.Seconds()
 
 				p.RateEstimate = progress[p.Name].RateEstimate
-				fmt.Println(p.RateEstimate)
 				if p.RateEstimate == 0 {
 					p.RateEstimate = now.Sub(p.Started).Seconds() * ((p.TotalProgress - p.CurrentProgress) / p.CurrentProgress)
 				}
-				fmt.Println(p.RateEstimate)
 
 				rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
 				remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
