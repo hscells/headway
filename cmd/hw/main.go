@@ -58,6 +58,7 @@ ul {
 		<ul style="font-size: 11px">
 			<li>started: {{ $p.Started.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
 			<li>last updated: {{ $p.LastUpdate.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
+			<li>last item took: {{ $p.LastTook }}</li>
 			<li>time elapsed: {{ $p.Elapsed }}</li>
 			<li>time remaining: {{ $p.Remaining }}</li>
 		</ul>
@@ -187,6 +188,7 @@ func main() {
 
 				now := time.Now()
 				p.LastCompleted = now.Sub(p.LastUpdate)
+				p.LastTook = durafmt.Parse(p.LastCompleted).LimitFirstN(2).String()
 				p.LastUpdate = now
 			} else {
 				p.LastUpdate = time.Now()

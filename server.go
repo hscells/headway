@@ -10,7 +10,8 @@ type Progress struct {
 	Comment         string  `form:"comment"`
 	Remaining       string
 	Elapsed         string
+	LastTook        string
+	LastCompleted   time.Duration
 	Started         time.Time
 	LastUpdate      time.Time
-	LastCompleted   time.Duration
 }
