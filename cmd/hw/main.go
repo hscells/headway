@@ -2,9 +2,11 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/hako/durafmt"
 	"github.com/hscells/headway"
 	"html/template"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -43,6 +45,9 @@ a:clicked {
 a { 
 	color: #eee;
 }
+ul {
+	margin-left: 2em;
+}
 </style>
 </head>
 <body>
@@ -50,7 +55,12 @@ a {
 	<div class="box">
 		<div><b class="name">{{ $p.Name }}</b> - {{ $p.CurrentProgress }}/{{ $p.TotalProgress }}</div>
 		<div><em>{{ $p.Comment}}</em></div>
-		<div>{{ $p.LastUpdate }}</div>
+		<ul style="font-size: 11px">
+			<li>started: {{ $p.Started.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
+			<li>last updated: {{ $p.LastUpdate.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
+			<li>time elapsed: {{ $p.Elapsed }}</li>
+			<li>time remaining: {{ $p.Remaining }}</li>
+		</ul>
 		<div><progress value="{{ $p.CurrentProgress }}" max="{{ $p.TotalProgress }}"></progress></div>
 	</div>
 	{{ end }}
@@ -86,7 +96,7 @@ function addSort(sort) {
 type data struct {
 	Progress    []*headway.Progress
 	Filters     []string
-	LastUpdated time.Time
+	LastUpdated string
 }
 
 func main() {
@@ -119,6 +129,25 @@ func main() {
 		}
 		mu.Unlock()
 
+		// Compute time remaining for each log item.
+		for n, p := range logs {
+			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
+			now := time.Now()
+			rate := 1.0 / ((p.TotalProgress * float64(time.Second)) * p.LastCompleted.Seconds())
+			weight := math.Exp(-now.Sub(p.LastUpdate).Seconds() / time.Second.Seconds())
+			rateEst := p.RateEstimate*weight + rate*(1.0-weight)
+			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) / rateEst
+
+			//slowness := p.TotalProgress * p.LastCompleted.Seconds()
+			//weight := math.Exp(-1 / (p.TotalProgress * time.Hour.Seconds()))
+			//rateEst := p.RateEstimate*weight + slowness*(1.0-weight)
+			//remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
+
+			logs[n].Remaining = durafmt.Parse(time.Duration(remaining)).LimitFirstN(2).String()
+			logs[n].Elapsed = durafmt.Parse(now.Sub(p.Started)).LimitFirstN(2).String()
+			logs[n].RateEstimate = rateEst
+		}
+
 		// Filter logs to those that contain the filter keyword.
 		if len(f) > 0 {
 			n := 0
@@ -135,7 +164,7 @@ func main() {
 		err := tmpl.Execute(c.Writer, data{
 			Progress:    logs,
 			Filters:     filters,
-			LastUpdated: time.Now(),
+			LastUpdated: time.Now().Format(time.RFC822),
 		})
 		if err != nil {
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -149,8 +178,19 @@ func main() {
 	g.PUT("/", func(c *gin.Context) {
 		var p *headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
-			p.LastUpdate = time.Now()
 			mu.Lock()
+			if _, ok := progress[p.Name]; ok {
+				p.Started = progress[p.Name].Started
+				p.LastUpdate = progress[p.Name].LastUpdate
+
+				now := time.Now()
+				p.LastCompleted = now.Sub(p.LastUpdate)
+				p.LastUpdate = now
+			} else {
+				p.LastUpdate = time.Now()
+				p.Started = p.LastUpdate
+				p.RateEstimate = time.Minute.Seconds()
+			}
 			progress[p.Name] = p
 			mu.Unlock()
 			c.Status(http.StatusOK)
