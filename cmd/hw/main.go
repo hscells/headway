@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/hako/durafmt"
 	"github.com/hscells/headway"
@@ -162,30 +163,41 @@ func main() {
 		if err := c.ShouldBindQuery(&p); err == nil {
 			mu.Lock()
 			if _, ok := progress[p.Name]; ok {
+				now := time.Now()
+
+				//numItems := p.CurrentProgress - progress[p.Name].CurrentProgress
+
 				p.Started = progress[p.Name].Started
 				p.LastUpdate = progress[p.Name].LastUpdate
-				p.RateEstimate = progress[p.Name].RateEstimate
-
-				now := time.Now()
 				p.LastCompleted = now.Sub(p.LastUpdate)
-				p.LastTook = durafmt.Parse(p.LastCompleted).LimitFirstN(2).String()
 				p.LastUpdate = now
+
+				// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
+
+				decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
+				weight := math.Exp(-1 / (p.TotalProgress * decayP))
+				slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastCompleted.Seconds()
+
+				p.RateEstimate = progress[p.Name].RateEstimate
+				fmt.Println(p.RateEstimate)
+				if p.RateEstimate == 0 {
+					p.RateEstimate = now.Sub(p.Started).Seconds() * ((p.TotalProgress - p.CurrentProgress) / p.CurrentProgress)
+				}
+				fmt.Println(p.RateEstimate)
+
+				rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
+				remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
+
+				p.Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
+				p.RateEstimate = rateEst
+
 			} else {
 				p.LastUpdate = time.Now()
 				p.Started = p.LastUpdate
 			}
 
-			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
-			decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
-
-			slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastCompleted.Seconds()
-			weight := math.Exp(-1 / (p.TotalProgress * decayP))
-			rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
-			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
-
-			p.Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
+			p.LastTook = durafmt.Parse(p.LastCompleted).LimitFirstN(2).String()
 			p.Elapsed = durafmt.Parse(time.Now().Sub(p.Started)).LimitFirstN(2).String()
-			p.RateEstimate = rateEst
 
 			progress[p.Name] = p
 			mu.Unlock()
