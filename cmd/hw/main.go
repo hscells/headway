@@ -140,7 +140,7 @@ func main() {
 			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
 			decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
 
-			slowness := (p.TotalProgress * time.Second.Seconds()) * (p.LastUpdate.Sub(p.Started).Seconds() + now.Sub(p.LastUpdate).Seconds())
+			slowness := (p.TotalProgress * time.Second.Seconds()) * p.LastUpdate.Sub(p.Started).Seconds()
 			weight := math.Exp(-1 / (p.TotalProgress * decayP))
 			rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
 			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
