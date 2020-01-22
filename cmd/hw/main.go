@@ -131,19 +131,20 @@ func main() {
 
 		// Compute time remaining for each log item.
 		for n, p := range logs {
-			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
 			now := time.Now()
-			rate := 1.0 / ((p.TotalProgress * float64(time.Second)) * p.LastCompleted.Seconds())
-			weight := math.Exp(-now.Sub(p.LastUpdate).Seconds() / time.Second.Seconds())
-			rateEst := p.RateEstimate*weight + rate*(1.0-weight)
-			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) / rateEst
+			if p.CurrentProgress >= p.TotalProgress {
+				continue
+			}
 
-			//slowness := p.TotalProgress * p.LastCompleted.Seconds()
-			//weight := math.Exp(-1 / (p.TotalProgress * time.Hour.Seconds()))
-			//rateEst := p.RateEstimate*weight + slowness*(1.0-weight)
-			//remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
+			// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
+			decayP := (math.E-1)*(p.CurrentProgress/p.TotalProgress) + 1
 
-			logs[n].Remaining = durafmt.Parse(time.Duration(remaining)).LimitFirstN(2).String()
+			slowness := (p.TotalProgress * time.Second.Seconds()) * (p.LastUpdate.Sub(p.Started).Seconds() + now.Sub(p.LastUpdate).Seconds())
+			weight := math.Exp(-1 / (p.TotalProgress * decayP))
+			rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
+			remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
+
+			logs[n].Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
 			logs[n].Elapsed = durafmt.Parse(now.Sub(p.Started)).LimitFirstN(2).String()
 			logs[n].RateEstimate = rateEst
 		}
@@ -182,6 +183,7 @@ func main() {
 			if _, ok := progress[p.Name]; ok {
 				p.Started = progress[p.Name].Started
 				p.LastUpdate = progress[p.Name].LastUpdate
+				p.RateEstimate = progress[p.Name].RateEstimate
 
 				now := time.Now()
 				p.LastCompleted = now.Sub(p.LastUpdate)
@@ -189,7 +191,6 @@ func main() {
 			} else {
 				p.LastUpdate = time.Now()
 				p.Started = p.LastUpdate
-				p.RateEstimate = time.Minute.Seconds()
 			}
 			progress[p.Name] = p
 			mu.Unlock()
