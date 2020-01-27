@@ -1,15 +1,24 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hako/durafmt"
 	"github.com/hscells/headway"
+	"github.com/nlopes/slack"
 	"html/template"
+	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
+	"os"
+	"path"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -56,6 +65,7 @@ ul {
 		<div><b class="name">{{ $p.Name }}</b> - {{ $p.CurrentProgress }}/{{ $p.TotalProgress }}</div>
 		<div><em>{{ $p.Comment}}</em></div>
 		<ul style="font-size: 11px">
+			<li>owner: {{ $p.User }}</li>
 			<li>started: {{ $p.Started.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
 			<li>last updated: {{ $p.LastUpdate.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
 			<li>last item took: {{ $p.LastTook }}</li>
@@ -66,6 +76,7 @@ ul {
 	</div>
 	{{ end }}
 	<div>
+		<p>Secret: 
 		<p>sort by <a href="javascript:addSort('progress')">progress</a> | <a href="javascript:addSort('updated')">last updated</a></p>
 		<p>filter by:</p>
 		<ul>
@@ -94,13 +105,83 @@ function addSort(sort) {
 </html>
 `
 
+const login = `
+<html>
+<head>
+<title>headway server login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* {
+	margin: 0;
+	padding: 0;
+	font-family: Helvetica, Arial, Sans-Serif;
+}
+body {
+	background: #000;
+	color: #fff;
+	margin: 1em;
+}
+progress {
+	width: 100%;
+	height: 32px;
+	background: #222;
+}
+.box {
+	border: 1px solid #222;
+	padding: 8px;
+}
+a:clicked {
+	color: #aaa;
+}
+a { 
+	color: #eee;
+}
+ul {
+	margin-left: 2em;
+}
+</style>
+</head>
+<body>
+<h1>Login</h1>
+<p>Login using slack. Once you login you will see your secret you can push logs with.</p>
+<!-- &redirect_uri=https://1e8ede83.ngrok.io/login/oauth -->
+<a href="https://slack.com/oauth/authorize?scope=usergroups:read,groups:read,channels:read,im:read,mpim:read&client_id=112293530195.812571961504"><img src="https://api.slack.com/img/sign_in_with_slack.png"/></a>
+</body>
+</html>
+`
+
 type data struct {
 	Progress    []*headway.Progress
 	Filters     []string
 	LastUpdated string
+	Secret      string
+}
+
+func randState() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 func main() {
+
+	f, err := os.OpenFile("config.json", os.O_RDONLY, 0664)
+	if err != nil {
+		panic(err)
+	}
+
+	var config headway.Config
+	err = json.NewDecoder(f).Decode(&config)
+	if err != nil {
+		panic(err)
+	}
+
+	g := gin.Default()
+	tokens := make(map[string]string)
+	secrets := make(map[string]string)
+	usernames := make(map[string]string)
+	store := cookie.NewStore([]byte(config.Cookie))
+	g.Use(sessions.Sessions("slack-archive", store))
 
 	progress := make(map[string]*headway.Progress)
 	var logsLastUpdated []*headway.Progress
@@ -113,9 +194,11 @@ func main() {
 		panic(err)
 	}
 
-	g := gin.Default()
-
 	g.GET("/", func(c *gin.Context) {
+		session := sessions.Default(c)
+		token := session.Get("token").(string)
+		accessToken := tokens[token]
+
 		s := c.Query("sort")
 		f := c.Query("filter")
 
@@ -134,7 +217,7 @@ func main() {
 		if len(f) > 0 {
 			n := 0
 			for _, p := range logs {
-				if strings.Contains(p.Name, f) {
+				if p.User == f {
 					logs[n] = p
 					n++
 				}
@@ -147,6 +230,7 @@ func main() {
 			Progress:    logs,
 			Filters:     filters,
 			LastUpdated: time.Now().Format(time.RFC822),
+			Secret:      accessToken,
 		})
 		if err != nil {
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -157,9 +241,83 @@ func main() {
 		return
 	})
 
+	g.GET("/login", func(c *gin.Context) {
+		_, err := c.Writer.WriteString(login)
+		if err != nil {
+			panic(err)
+		}
+		c.Status(http.StatusOK)
+		return
+	})
+	g.GET("/logout", func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Clear()
+	})
+	g.GET("/login/oauth", func(c *gin.Context) {
+		code := c.Query("code")
+		accessToken, _, err := slack.GetOAuthToken(&http.Client{}, config.SlackClientID, config.SlackClientSecret, code, "")
+		if err != nil {
+			panic(err)
+		}
+		session := sessions.Default(c)
+		token := randState()
+		tokens[token] = accessToken
+		session.Set("token", token)
+		err = session.Save()
+		if err != nil {
+			panic(err)
+		}
+
+		s := slack.New(accessToken)
+		ident, err := s.GetUserIdentity()
+		if err != nil {
+			panic(err)
+		}
+		err = os.MkdirAll("secrets", 0666)
+		if err != nil {
+			panic(err)
+		}
+		usernames[accessToken] = ident.User.Name
+		if _, err := os.Stat(ident.User.ID); os.IsNotExist(err) {
+			secretsFile, err := os.OpenFile(path.Join("secrets", ident.User.ID), os.O_CREATE|os.O_WRONLY, 0664)
+			if err != nil {
+				panic(err)
+			}
+			secret := uuid.New().String()
+			_, err = secretsFile.WriteString(secret)
+			if err != nil {
+				panic(err)
+			}
+			secrets[accessToken] = secret
+		} else {
+			secretsFile, err := os.OpenFile(ident.User.ID, os.O_RDONLY, 0664)
+			if err != nil {
+				panic(err)
+			}
+			b, err := ioutil.ReadAll(secretsFile)
+			if err != nil {
+				panic(err)
+			}
+			secret := string(b)
+			secrets[accessToken] = secret
+		}
+		c.Redirect(http.StatusFound, "/")
+		return
+	})
+
 	g.PUT("/", func(c *gin.Context) {
 		var p *headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
+			session := sessions.Default(c)
+			token := session.Get("token").(string)
+			accessToken := tokens[token]
+
+			// Do not allow a PUT if the user isn't authorised to.
+			if p.Secret != secrets[accessToken] {
+				c.Status(http.StatusUnauthorized)
+				return
+			}
+
 			mu.Lock()
 			if _, ok := progress[p.Name]; ok {
 				now := time.Now()
@@ -236,20 +394,11 @@ func main() {
 
 			mu.Lock()
 			i := 0
-			for k, v := range progress {
-
-				// Find filters.
-				split := strings.Split(k, " ")
-				for _, kw := range split {
-					if _, ok := seenFilters[kw]; ok {
-						continue
-					}
-					if kw[0] == '@' {
-						filters = append(filters, kw)
-						seenFilters[kw] = struct{}{}
-					}
+			for _, v := range progress {
+				if _, ok := seenFilters[v.User]; ok {
+					seenFilters[v.User] = struct{}{}
+					filters = append(filters, v.User)
 				}
-
 				// Populate the lists.
 				logsLastUpdated[i] = v
 				logsProgress[i] = v

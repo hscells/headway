@@ -3,15 +3,18 @@ package headway
 import "time"
 
 type Progress struct {
-	RateEstimate    float64
-	CurrentProgress float64 `form:"current"`
-	TotalProgress   float64 `form:"total"`
-	Name            string  `form:"name"`
-	Comment         string  `form:"comment"`
-	Remaining       string
-	Elapsed         string
-	LastTook        string
-	LastCompleted   time.Duration
-	Started         time.Time
-	LastUpdate      time.Time
+	RateEstimate    float64                  // Estimate of how many seconds per update the time estimate should increase/decrease.
+	CurrentProgress float64 `form:"current"` // Current progress of the task.
+	TotalProgress   float64 `form:"total"`   // Total amount of progress of the task.
+	Name            string  `form:"name"`    // Identifier of the task.
+	Comment         string  `form:"comment"` // Additional information, related to the task.
+	Message         string  `form:"message"` // Message to pass into slack.
+	Secret          string  `form:"secret"`  // Client secret to authenticate log requests.
+	User            string                   // Computed username from slack.
+	Remaining       string                   // Computed string for time remaining.
+	Elapsed         string                   // Computed string for time elapsed.
+	LastTook        string                   // Computed string for how much time the last item took.
+	LastCompleted   time.Duration            // Computed duration for how long the last item took.
+	Started         time.Time                // Computed duration for when the task was started.
+	LastUpdate      time.Time                // Computed time the last task was last updated.
 }
