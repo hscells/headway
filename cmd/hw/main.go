@@ -78,7 +78,6 @@ ul {
 	</div>
 	{{ end }}
 	<div>
-		<p>Secret: {{ .Secret }}
 		<p>sort by <a href="javascript:addSort('progress')">progress</a> | <a href="javascript:addSort('updated')">last updated</a></p>
 		<p>filter by:</p>
 		<ul>
@@ -87,7 +86,10 @@ ul {
 		{{ end }}
 		</ul>
 	</div>
-	<small>last updated: {{ .LastUpdated }}</small>
+	<div style="font-size: 11px">
+		<p style="display:inline;">Secret: <pre style="display:inline; font-family: monospace">{{ .Secret }}</pre></p>
+		<p>last updated: {{ .LastUpdated }}</p>
+	</div>
 <script type="text/javascript">
 window.setTimeout(function() {
 	location.reload();
@@ -355,7 +357,7 @@ func main() {
 				if err != nil {
 					panic(err)
 				}
-				ch, ts, err := bot.PostMessage(ident.User.ID, slack.MsgOptionText(fmt.Sprintf("Ahoy <@%s>! New message:\n> %s", ident.User.ID, p.Message), false))
+				ch, ts, err := bot.PostMessage(ident.User.ID, slack.MsgOptionText(fmt.Sprintf("Ahoy <@%s>! New message:\n```%s```", ident.User.ID, p.Message), false))
 				fmt.Println(ch, ts)
 				if err != nil {
 					panic(err)

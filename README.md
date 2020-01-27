@@ -17,4 +17,12 @@ curl -X PUT "localhost:7777/?secret=ABC-XYZ-123&name=example&current=10&total=10
 Only the `comment` parameter is optional. Both the `current` and `total` must be send each bar update. The `name` parameter is also always required.
 The `secret` parameter will be made available once you log in through Slack.
 
-An additional, optional, `message` parameter can be used to send a direct message to yourself on Slack, as an alert.
+An additional, optional, `message` parameter can be used to send a direct message to yourself on Slack, as an alert. For example:
+
+```
+curl -X PUT "localhost:7777/?secret=ABC-XYZ-123&message=task%20crashed%20on%20line%2042"
+```
+
+## todo
+
+ - documentation for slack setup
