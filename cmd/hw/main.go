@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -76,7 +78,7 @@ ul {
 	</div>
 	{{ end }}
 	<div>
-		<p>Secret: 
+		<p>Secret: {{ .Secret }}
 		<p>sort by <a href="javascript:addSort('progress')">progress</a> | <a href="javascript:addSort('updated')">last updated</a></p>
 		<p>filter by:</p>
 		<ul>
@@ -144,8 +146,7 @@ ul {
 <body>
 <h1>Login</h1>
 <p>Login using slack. Once you login you will see your secret you can push logs with.</p>
-<!-- &redirect_uri=https://1e8ede83.ngrok.io/login/oauth -->
-<a href="https://slack.com/oauth/authorize?scope=usergroups:read,groups:read,channels:read,im:read,mpim:read&client_id=112293530195.812571961504"><img src="https://api.slack.com/img/sign_in_with_slack.png"/></a>
+<a href="https://slack.com/oauth/authorize?client_id=112293530195.922970412213&scope=im:write&user_scope=identify">Click here to login.</a>
 </body>
 </html>
 `
@@ -176,6 +177,8 @@ func main() {
 		panic(err)
 	}
 
+	bot := slack.New(config.SlackOAuthBotToken)
+
 	g := gin.Default()
 	tokens := make(map[string]string)
 	secrets := make(map[string]string)
@@ -193,6 +196,29 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Middleware for redirecting for authentication.
+	g.Use(func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet {
+			if strings.Contains(c.Request.URL.Path, "/login") {
+				c.Next()
+				return
+			}
+			session := sessions.Default(c)
+			token := session.Get("token")
+			if token == nil || len(token.(string)) == 0 {
+				c.Redirect(http.StatusFound, "/login")
+				c.Abort()
+				return
+			}
+			if _, ok := tokens[token.(string)]; !ok {
+				c.Redirect(http.StatusFound, "/login")
+				c.Abort()
+				return
+			}
+		}
+		c.Next()
+	})
 
 	g.GET("/", func(c *gin.Context) {
 		session := sessions.Default(c)
@@ -230,7 +256,7 @@ func main() {
 			Progress:    logs,
 			Filters:     filters,
 			LastUpdated: time.Now().Format(time.RFC822),
-			Secret:      accessToken,
+			Secret:      secrets[accessToken],
 		})
 		if err != nil {
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -273,13 +299,14 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		err = os.MkdirAll("secrets", 0666)
+		err = os.MkdirAll("secrets", 0777)
 		if err != nil {
 			panic(err)
 		}
+		secretPath := path.Join("secrets", ident.User.ID)
 		usernames[accessToken] = ident.User.Name
-		if _, err := os.Stat(ident.User.ID); os.IsNotExist(err) {
-			secretsFile, err := os.OpenFile(path.Join("secrets", ident.User.ID), os.O_CREATE|os.O_WRONLY, 0664)
+		if _, err := os.Stat(secretPath); os.IsNotExist(err) {
+			secretsFile, err := os.OpenFile(secretPath, os.O_CREATE|os.O_WRONLY, 0664)
 			if err != nil {
 				panic(err)
 			}
@@ -290,7 +317,7 @@ func main() {
 			}
 			secrets[accessToken] = secret
 		} else {
-			secretsFile, err := os.OpenFile(ident.User.ID, os.O_RDONLY, 0664)
+			secretsFile, err := os.OpenFile(secretPath, os.O_RDONLY, 0664)
 			if err != nil {
 				panic(err)
 			}
@@ -308,13 +335,32 @@ func main() {
 	g.PUT("/", func(c *gin.Context) {
 		var p *headway.Progress
 		if err := c.ShouldBindQuery(&p); err == nil {
-			session := sessions.Default(c)
-			token := session.Get("token").(string)
-			accessToken := tokens[token]
-
 			// Do not allow a PUT if the user isn't authorised to.
-			if p.Secret != secrets[accessToken] {
+			foundSecret := false
+			var accessToken string
+			for token, secret := range secrets {
+				if secret == p.Secret {
+					accessToken = token
+					foundSecret = true
+				}
+			}
+			if !foundSecret {
 				c.Status(http.StatusUnauthorized)
+				return
+			}
+
+			if len(p.Message) > 0 {
+				api := slack.New(accessToken)
+				ident, err := api.GetUserIdentity()
+				if err != nil {
+					panic(err)
+				}
+				ch, ts, err := bot.PostMessage(ident.User.ID, slack.MsgOptionText(fmt.Sprintf("Ahoy <@%s>! New message:\n> %s", ident.User.ID, p.Message), false))
+				fmt.Println(ch, ts)
+				if err != nil {
+					panic(err)
+				}
+				c.Status(http.StatusOK)
 				return
 			}
 
@@ -327,6 +373,7 @@ func main() {
 				p.Started = progress[p.Name].Started
 				p.LastUpdate = progress[p.Name].LastUpdate
 				p.LastCompleted = now.Sub(p.LastUpdate)
+				p.User = progress[p.Name].User
 				p.LastUpdate = now
 
 				// https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
@@ -349,6 +396,13 @@ func main() {
 			} else {
 				p.LastUpdate = time.Now()
 				p.Started = p.LastUpdate
+
+				api := slack.New(accessToken)
+				ident, err := api.GetUserIdentity()
+				if err != nil {
+					panic(err)
+				}
+				p.User = ident.User.Name
 			}
 
 			p.LastTook = durafmt.Parse(p.LastCompleted).LimitFirstN(2).String()
@@ -389,13 +443,12 @@ func main() {
 
 			filters = make([]string, 0)
 			seenFilters := make(map[string]struct{})
+			mu.Lock()
 			logsLastUpdated = make([]*headway.Progress, len(progress))
 			logsProgress = make([]*headway.Progress, len(progress))
-
-			mu.Lock()
 			i := 0
 			for _, v := range progress {
-				if _, ok := seenFilters[v.User]; ok {
+				if _, ok := seenFilters[v.User]; !ok {
 					seenFilters[v.User] = struct{}{}
 					filters = append(filters, v.User)
 				}
