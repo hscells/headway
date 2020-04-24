@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hako/durafmt"
 	"github.com/hscells/headway"
-	"github.com/nlopes/slack"
+	"github.com/slack-go/slack"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -72,7 +72,7 @@ ul {
 			<li>last updated: {{ $p.LastUpdate.Format "Jan 02, 2006 15:04:05 UTC" }}</li>
 			<li>last item took: {{ $p.LastTook }}</li>
 			<li>time elapsed: {{ $p.Elapsed }}</li>
-			<li>time remaining: {{ $p.Remaining }}</li>
+			<li>ETA: {{ $p.Remaining }}</li>
 		</ul>
 		<div><progress value="{{ $p.CurrentProgress }}" max="{{ $p.TotalProgress }}"></progress></div>
 	</div>
@@ -148,7 +148,7 @@ ul {
 <body>
 <h1>Login</h1>
 <p>Login using slack. Once you login you will see your secret you can push logs with.</p>
-<a href="https://slack.com/oauth/authorize?client_id=112293530195.922970412213&scope=im:write&user_scope=identify">Click here to login.</a>
+<a href="https://slack.com/oauth/authorize?scope=identify&client_id=112293530195.922970412213"><img src="https://api.slack.com/img/sign_in_with_slack.png" /></a>
 </body>
 </html>
 `
@@ -183,7 +183,10 @@ func main() {
 
 	g := gin.Default()
 	tokens := make(map[string]string)
-	secrets := make(map[string]string)
+	secrets, err := headway.LoadSecrets("secrets")
+	if err != nil {
+		panic(err)
+	}
 	usernames := make(map[string]string)
 	store := cookie.NewStore([]byte(config.Cookie))
 	g.Use(sessions.Sessions("slack-archive", store))
@@ -253,6 +256,10 @@ func main() {
 			logs = logs[:n]
 		}
 
+		for _, p := range logs {
+			p.Elapsed = durafmt.Parse(time.Now().Sub(p.Started)).LimitFirstN(2).String()
+		}
+
 		// Execute the template with the chosen (subset of) logs.
 		err := tmpl.Execute(c.Writer, data{
 			Progress:    logs,
@@ -283,10 +290,12 @@ func main() {
 	})
 	g.GET("/login/oauth", func(c *gin.Context) {
 		code := c.Query("code")
+
 		accessToken, _, err := slack.GetOAuthToken(&http.Client{}, config.SlackClientID, config.SlackClientSecret, code, "")
 		if err != nil {
 			panic(err)
 		}
+
 		session := sessions.Default(c)
 		token := randState()
 		tokens[token] = accessToken
@@ -392,7 +401,7 @@ func main() {
 				rateEst := (p.RateEstimate * weight) + (slowness * (1.0 - weight))
 				remaining := (1.0 - (p.CurrentProgress / p.TotalProgress)) * rateEst
 
-				p.Remaining = durafmt.Parse(time.Duration(remaining) * time.Second).LimitFirstN(2).String()
+				p.Remaining = now.Add(time.Duration(remaining) * time.Second).Format(time.RFC822)
 				p.RateEstimate = rateEst
 
 			} else {
@@ -408,7 +417,6 @@ func main() {
 			}
 
 			p.LastTook = durafmt.Parse(p.LastCompleted).LimitFirstN(2).String()
-			p.Elapsed = durafmt.Parse(time.Now().Sub(p.Started)).LimitFirstN(2).String()
 
 			progress[p.Name] = p
 			mu.Unlock()
