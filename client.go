@@ -7,21 +7,21 @@ import (
 )
 
 type Client struct {
-	host   string
-	secret string
-	client http.Client
+	Host   string
+	Secret string
+	Client http.Client
 }
 
 func NewClient(host, secret string) *Client {
 	return &Client{
-		secret: secret,
-		host:   host,
-		client: http.Client{},
+		Secret: secret,
+		Host:   host,
+		Client: http.Client{},
 	}
 }
 
 func (c *Client) Send(current, total float64, name, comment string) error {
-	req, err := http.NewRequest(http.MethodPut, c.host, nil)
+	req, err := http.NewRequest(http.MethodPut, c.Host, nil)
 	if err != nil {
 		return err
 	}
@@ -30,10 +30,10 @@ func (c *Client) Send(current, total float64, name, comment string) error {
 	q.Add("current", fmt.Sprintf("%f", current))
 	q.Add("total", fmt.Sprintf("%f", total))
 	q.Add("comment", comment)
-	q.Add("secret", c.secret)
+	q.Add("Secret", c.Secret)
 	req.URL.RawQuery = q.Encode()
 
-	resp, err := c.client.Do(req)
+	resp, err := c.Client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -46,16 +46,16 @@ func (c *Client) Send(current, total float64, name, comment string) error {
 }
 
 func (c *Client) Message(message string) error {
-	req, err := http.NewRequest(http.MethodPut, c.host, nil)
+	req, err := http.NewRequest(http.MethodPut, c.Host, nil)
 	if err != nil {
 		return err
 	}
 	q := req.URL.Query()
 	q.Add("message", message)
-	q.Add("secret", c.secret)
+	q.Add("Secret", c.Secret)
 	req.URL.RawQuery = q.Encode()
 
-	resp, err := c.client.Do(req)
+	resp, err := c.Client.Do(req)
 	if err != nil {
 		return err
 	}

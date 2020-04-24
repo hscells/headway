@@ -10,7 +10,7 @@ type Progress struct {
 	Name            string  `form:"name"`    // Identifier of the task.
 	Comment         string  `form:"comment"` // Additional information, related to the task.
 	Message         string  `form:"message"` // Message to pass into slack.
-	Secret          string  `form:"secret"`  // Client secret to authenticate log requests.
+	Secret          string  `form:"Secret"`  // Client Secret to authenticate log requests.
 	User            string                   // Computed username from slack.
 	Remaining       string                   // Computed string for time remaining.
 	Elapsed         string                   // Computed string for time elapsed.
